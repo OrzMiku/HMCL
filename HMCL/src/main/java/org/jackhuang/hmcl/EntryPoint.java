@@ -37,6 +37,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.jackhuang.hmcl.util.logging.Logger.LOG;
 import static org.jackhuang.hmcl.util.i18n.I18n.i18n;
@@ -107,32 +109,33 @@ public final class EntryPoint {
                 String currentDesktop = Objects.requireNonNullElse(System.getenv("XDG_CURRENT_DESKTOP"), "");
 
                 // On KDE Wayland, JavaFX cannot read the UI scale correctly.
-                if ("wayland".equals(sessionType) && currentDesktop.startsWith("kde")) {
+                if("wayland".equals(sessionType) && currentDesktop.contains("KDE")) {
                     Path dbusSend = SystemUtils.which("dbus-send");
-                    if (dbusSend != null) {
+                    if(dbusSend != null) {
                         try {
-                            String[] result = SystemUtils.run(List.of(
-                                    FileUtils.getAbsolutePath(dbusSend),
+                            String result = SystemUtils.run(List.of(
+                                    dbusSend.toString(),
                                     "--session",
                                     "--print-reply=literal",
                                     "--reply-timeout=1000",
-                                    "--dest=org.freedesktop.portal.Desktop",
-                                    "/org/freedesktop/portal/desktop",
-                                    "org.freedesktop.portal.Settings.Read",
-                                    "string:org.kde.kdeglobals.KScreen",
-                                    "string:ScaleFactor"
-                            ), Duration.ofSeconds(2)).trim().split(" ");
+                                    "--dest=org.kde.KWin",
+                                    "/KWin",
+                                    "org.kde.KWin.supportInformation"
+                            ), Duration.ofSeconds(2));
 
-                            if (result.length > 0) {
-                                String value = result[result.length - 1];
+                            Pattern KWIN_SCALE_PATTERN = Pattern.compile(
+                                    "(?m)^\\s*Scale:\\s*([0-9]+(?:\\.[0-9]+)?)\\s*$"
+                            );
 
+                            Matcher matcher = KWIN_SCALE_PATTERN.matcher(result);
+
+                            if(matcher.find()) {
                                 try {
-                                    double scaleValue = Double.parseDouble(value.trim());
-                                    if (scaleValue > 1.0 && scaleValue <= 4) {
+                                    double scaleValue = Double.parseDouble(matcher.group(1));
+                                    if(scaleValue > 1.0 && scaleValue <= 4.0) {
                                         scale = scaleValue;
                                     }
-                                } catch (NumberFormatException ignored) {
-                                }
+                                } catch (NumberFormatException ignored) {}
                             }
                         } catch (Exception e) {
                             LOG.warning("Failed to get UI scale from D-Bus", e);
@@ -178,6 +181,7 @@ public final class EntryPoint {
         }
 
         if (scale > 0) {
+            uiScale = Double.toString(scale);
             if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS) {
                 System.getProperties().putIfAbsent("glass.win.uiScale", uiScale);
             } else if (OperatingSystem.CURRENT_OS == OperatingSystem.MACOS) {
